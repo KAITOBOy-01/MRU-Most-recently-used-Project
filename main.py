@@ -27,11 +27,9 @@ def mru_page_replacement(page_sequence, frame_count):
                 frames.append(page)
             else:
                 # Find Most Recently Used page among frames
-                # (page in frames with max last_used index)
                 mru_page = None
                 mru_index = -1
                 for p in frames:
-                    # if page never used before, set to -1 (very old)
                     idx = last_used.get(p, -1)
                     if idx > mru_index:
                         mru_index = idx
@@ -60,6 +58,111 @@ def mru_page_replacement(page_sequence, frame_count):
     detail_df = pd.DataFrame(steps_data)
 
     return faults, fault_rate, detail_df
+
+
+# -------------- HELPER FUNCTIONS FOR UI -------------- #
+
+def split_frame_state(state_str):
+    # "11 | 12 | - | -" -> ["11", "12", "-", "-"]
+    return [s.strip() for s in state_str.split("|")]
+
+def render_results(title, pages, faults, fault_rate, detail_df, frame_count):
+    """Render the modern cards + table for one case."""
+    st.markdown(f"## 📁 {title}")
+
+    # ----- Summary cards -----
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(
+            f"""
+            <div style="padding:20px;border-radius:15px;background:#1e1e1e;text-align:center;">
+                <h3 style="margin-bottom:5px;">Total References</h3>
+                <h1 style="color:#4FC3F7;margin-top:0px;">{len(pages)}</h1>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col2:
+        st.markdown(
+            f"""
+            <div style="padding:20px;border-radius:15px;background:#1e1e1e;text-align:center;">
+                <h3 style="margin-bottom:5px;">Page Faults</h3>
+                <h1 style="color:#FF8A80;margin-top:0px;">{faults}</h1>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with col3:
+        st.markdown(
+            f"""
+            <div style="padding:20px;border-radius:15px;background:#1e1e1e;text-align:center;">
+                <h3 style="margin-bottom:5px;">Fault Rate (%)</h3>
+                <h1 style="color:#81C784;margin-top:0px;">{fault_rate:.2f}</h1>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("### 🧠 Step-by-Step MRU Execution")
+
+    # Convert "Frame State" column into separate frame columns
+    detail_df["Frame State"] = detail_df["Frame State"].apply(split_frame_state)
+
+    expanded_df = detail_df.copy()
+
+    max_frames = frame_count
+    for i in range(max_frames):
+        expanded_df[f"Frame {i+1}"] = expanded_df["Frame State"].apply(
+            lambda x, idx=i: x[idx] if idx < len(x) else "-"
+        )
+
+    expanded_df.drop(columns=["Frame State"], inplace=True)
+
+    # Color badges for Hit / Fault
+    def hit_badge(val):
+        if val == "Hit":
+            return '<span style="color:#00e676;font-weight:bold;">🟢 HIT</span>'
+        else:
+            return '<span style="color:#ff5252;font-weight:bold;">🔴 FAULT</span>'
+
+    expanded_df["Status"] = expanded_df["Hit/Fault"].apply(hit_badge)
+    expanded_df.drop(columns=["Hit/Fault"], inplace=True)
+
+    # Neater column order
+    cols_order = ["Step", "Page"] + [f"Frame {i+1}" for i in range(max_frames)] + ["Status"]
+    expanded_df = expanded_df[cols_order]
+
+    # Simple CSS for table
+    st.markdown(
+        """
+        <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            padding: 6px 10px;
+            text-align: center;
+        }
+        thead tr {
+            background-color: #212121;
+        }
+        tbody tr:nth-child(odd) {
+            background-color: #121212;
+        }
+        tbody tr:nth-child(even) {
+            background-color: #1a1a1a;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.write(expanded_df.to_html(escape=False, index=False), unsafe_allow_html=True)
+    st.divider()
+
 
 # ---------------- STREAMLIT UI ---------------- #
 
@@ -124,17 +227,7 @@ if input_method == "Manual input":
 
             faults, fault_rate, detail_df = mru_page_replacement(pages, frame_count)
 
-            st.subheader("Result (Manual Input)")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total References", len(pages))
-            with col2:
-                st.metric("Page Faults", faults)
-            with col3:
-                st.metric("Page Fault Rate (%)", f"{fault_rate:.2f}")
-
-            st.write("### Step-by-step MRU Table")
-            st.dataframe(detail_df, use_container_width=True)
+            render_results("Manual Input", pages, faults, fault_rate, detail_df, frame_count)
 
 # ------------- FILE INPUT ------------- #
 else:
@@ -147,7 +240,7 @@ else:
 **File format suggestions:**
 - Each **column** = one case (sequence of pages)  
 - Each **row** = next page reference  
-- Non-numeric cells or empty cells will be ignored  
+- Non-numeric or empty cells are ignored  
 - Max **20 rows** (page references) per column
 """)
 
@@ -177,7 +270,6 @@ else:
         numeric_cases_found = False
 
         for col in df.columns:
-            # Drop NaN and convert to int if possible
             series = df[col].dropna()
 
             if series.empty:
@@ -194,18 +286,7 @@ else:
 
             faults, fault_rate, detail_df = mru_page_replacement(pages, frame_count)
 
-            st.markdown(f"## Case: `{col}`")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total References", len(pages))
-            with col2:
-                st.metric("Page Faults", faults)
-            with col3:
-                st.metric("Page Fault Rate (%)", f"{fault_rate:.2f}")
-
-            st.write("### Step-by-step MRU Table")
-            st.dataframe(detail_df, use_container_width=True)
-            st.divider()
+            render_results(f"Case: {col}", pages, faults, fault_rate, detail_df, frame_count)
 
         if not numeric_cases_found:
             st.error("No numeric columns found. Please make sure your file has numeric page references.")
